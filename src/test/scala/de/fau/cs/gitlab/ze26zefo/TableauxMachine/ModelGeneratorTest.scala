@@ -1,10 +1,10 @@
 package de.fau.cs.gitlab.ze26zefo.TableauxMachine
 
 import info.kwarc.mmt.api._
-import info.kwarc.mmt.api.objects.{OMV, Term}
+import info.kwarc.mmt.api.objects._
 import info.kwarc.mmt.api.utils.URI
 import org.scalatest._
-import info.kwarc.gf.Convenience.{Pred1, Pred2, not => termNot, or => termOr, Eq => termEq}
+import info.kwarc.gf.Convenience.{Pred1, Pred2, Eq => termEq, forall => termForall, not => termNot, or => termOr}
 
 import scala.collection.Map
 class ModelGeneratorTest extends FlatSpec with Matchers {
@@ -32,6 +32,10 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
     Pred1(genGlobalPredName(name), term)
   }
 
+  private def c(name: String): Term = {
+    OMV(LocalName(List(SimpleStep(name))))
+  }
+
   private def pred1(name: String, arg1: Term): Term = {
     Pred1(genGlobalPredName(name), arg1)
   }
@@ -43,6 +47,21 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
   private def and(term1: Term, term2: Term): Term = {
     termNot(termOr(termNot(term1), termNot(term2)))
   }
+
+  private def imp(term1: Term, term2: Term): Term = {
+    termOr(termNot(term1), term2)
+  }
+
+  private def forall(variableName: String, innerTerm: Term): OMA = {
+    termForall(new LocalName(List(SimpleStep(variableName))), innerTerm)
+  }
+
+  private def exists(variableName: String, innerTerm: Term): Term = {
+    termNot(forall(variableName, termNot(innerTerm)))
+  }
+
+  // FRAGMENT 1 - Simple Tableaux Calculus
+  // ========================================
 
   it should "generate simple models" in new Machine {
     machine.feed(v("a"))
@@ -124,6 +143,9 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
       pred2("kill", v("mouse"), v("hammer")) -> true
     ))
   }
+
+  // FRAGMENT 1 - PL_NQ with equality (=)
+  // ========================================
 
   it should "propagate one-level equalities with Pred1" in new Machine {
     machine.feed(termEq(v("a"), v("b")))
@@ -240,5 +262,139 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
       pred2("like", v("peter"), v("the_teacher")) -> true,
       pred2("like", v("peter"), v("mary")) -> true
     ))
+  }
+
+  // FRAGMENT 2 - Free variables
+  // ========================================
+  ignore should "Free variables with world knowledge" in new Machine {
+    // Mary is the teacher. Peter likes the teacher.
+    machine.feed(termEq(v("mary"), v("the_teacher")))
+    machine.feed(termOr(
+      termEq(v("the_teacher"), v("the_mother")),
+      termEq(v("the_teacher"), v("the_sister"))
+    ))
+    machine.feed(termEq(v("the_writer"), v("the_mother")))
+
+    // Peter likes the teacher. Peter does not like the (his) mother.
+    // => The teacher is the (his) sister.
+    machine.feed(pred2("like", v("peter"), v("fido")))
+    machine.feed(pred2("bite", v("x"), v("y")))
+
+    machine.feed(pred1("dog", v("fido")))
+    machine.feed(pred1("human", v("peter")))
+
+    // No one bites himself.
+    machine.feed(termNot(pred2("bite", v("x"), v("x"))))
+    // Humans do not bite dogs.
+    machine.feed(imp(and(pred1("dog", v("x")), pred1("human", v("y"))), termNot(pred2("bite", v("y"), v("x")))))
+
+    machine.nextModel().get.getInterpretation should be (Map(
+      pred1("dog", v("fido")) -> true,
+      pred1("human", v("peter")) -> true,
+
+      pred2("bite", v("fido"), v("peter")) -> true
+    ))
+  }
+
+  // FRAGMENT 4 - Quantifiers
+  // ========================================
+  // https://mathhub.info/Teaching/LBS?LogicSyntax?ind
+  it should "Forall quantifier 1" in new Machine {
+    // Cf. LBS lecture notes, slide 149.
+
+    // Peter is a man.
+    machine.feed(pred1("man", c("peter")))
+
+    // No man walks.
+    machine.feed(termNot(
+      exists(
+        "x",
+        and(pred1("man", c("x")), pred1("walk", c("x")))
+      )
+    ))
+
+    machine.nextModel().get.getInterpretation should be (Map(
+      pred1("man", c("peter")) -> true,
+      pred1("walk", c("peter")) -> false
+    ))
+  }
+
+  it should "Forall quantifier 2" in new Machine {
+    // Cf. LBS lecture notes, slide 149.
+
+    // Peter is a man.
+    machine.feed(pred1("man", c("peter")))
+
+    // All men are hungry or sleeping.
+    machine.feed(forall("x", imp(pred1("man", c("x")), termOr(pred1("hungry", c("x")), pred1("sleep", c("x"))))))
+
+    machine.feed(termNot(pred1("hungry", c("peter"))))
+
+    machine.nextModel().get.getInterpretation should be (Map(
+      pred1("man", c("peter")) -> true,
+      pred1("sleep", c("peter")) -> true,
+      pred1("hungry", c("peter")) -> false
+    ))
+  }
+
+  /**
+    * This test runs very long (> 2min at least).
+    * Might stem from the combinatorial explosion.
+    */
+  ignore should "Multiple forall quantifiers" in new Machine {
+    // Cf. LBS lecture notes, slide 149.
+
+    // Peter is a man.
+    machine.feed(pred1("man", c("peter")))
+
+    // The teacher is a woman.
+    machine.feed(pred1("woman", c("the_teacher")))
+
+    // The sister = The teacher = Mary, who is a woman.
+    machine.feed(termEq(c("the_sister"), c("the_teacher")))
+    machine.feed(termEq(c("mary"), c("the_sister")))
+    machine.feed(pred1("woman", c("mary")))
+
+    // Every man likes very woman.
+    machine.feed(
+      forall("x",
+        forall("y",
+          imp(
+            and(pred1("man", c("x")), pred1("woman", c("y"))),
+            pred2("like", c("x"), c("y"))
+          )
+        )
+      )
+    )
+
+    machine.feed(termNot(pred2("like", c("peter"), c("mary"))))
+
+    machine.nextModel() should be (None)
+  }
+
+  it should "cope with nested forall quantifiers" in new Machine {
+    // Cf. LBS lecture notes, slide 149.
+
+    // Peter is a man.
+    machine.feed(pred1("man", c("peter")))
+
+    // Mary is a woman.
+    machine.feed(pred1("woman", c("mary")))
+
+    // Every man likes very woman.
+    machine.feed(
+      forall("x",
+        forall("y",
+          imp(
+            and(pred1("man", c("x")), pred1("woman", c("y"))),
+            pred2("like", c("x"), c("y"))
+          )
+        )
+      )
+    )
+
+    machine.feed(termNot(pred2("like", c("peter"), c("mary"))))
+
+    machine.nextModel() should be (None)
   }
 }

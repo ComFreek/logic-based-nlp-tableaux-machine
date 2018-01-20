@@ -1,7 +1,9 @@
 package de.fau.cs.gitlab.ze26zefo.TableauxMachine
 
-import info.kwarc.gf.Convenience.{Eq, Pred1, Pred2, not, or}
-import info.kwarc.mmt.api.objects.{OMA, OMV, Term}
+import info.kwarc.gf.Convenience.{Eq, Pred1, Pred2, forall, not, or}
+import info.kwarc.mmt.api._
+import info.kwarc.mmt.api.objects._
+import info.kwarc.mmt.api.utils.URI
 
 import scala.collection.immutable.HashSet
 import scala.collection.mutable
@@ -178,6 +180,43 @@ class GraphTableauxMachine extends ModelGenerator {
     classes.map(s => s.toSet).toSet
   }
 
+  private def stepRMForallRule(): Boolean = {
+    // (RM:∀) rule
+    val individualConstants: Set[LocalName] = curNode
+      .innerNodeTraverser
+      .withDirection(Predecessors)
+      .flatMap((node: graph.NodeT) => node.terms.flatMap((annotatedTerm: (Term, Boolean)) => annotatedTerm._1.freeVars).toList)
+      .toSet
+
+    val forallInducedTerms: Set[(Term, Boolean)] = curNode
+      .innerNodeTraverser
+      .withDirection(Predecessors)
+      .flatMap((node: graph.NodeT) => node.terms.collect{
+        case (forall(x, innerTerm), true) => {
+          individualConstants
+            .map(ind => innerTerm.substitute(Substitution(Sub(x, OMV(ind))))(PlainSubstitutionApplier))
+        }
+      })
+      .flatten
+      .map((_, true)) // Annotate with true
+      .toSet
+
+    lazy val allTerms: Set[(Term, Boolean)] = curNode
+      .innerNodeTraverser
+      .withDirection(Predecessors)
+      .flatMap(_.terms)
+      .toSet
+
+    val newTerms = forallInducedTerms diff allTerms
+    if (newTerms.nonEmpty) {
+      curNode.terms.append(newTerms.toList : _*)
+      true
+    }
+    else {
+      false
+    }
+  }
+
   /**
     * Do an unspecified number of Tableaux steps in the given node.
     * To ensure saturation, call this function until it returns false.
@@ -250,7 +289,7 @@ class GraphTableauxMachine extends ModelGenerator {
       }
     }
 
-    // Update equivlance sets
+    // Update equivalence sets
     node.equivalenceSets = equivalenceSetsClosure(
       curNode
       .innerNodeTraverser
@@ -259,7 +298,7 @@ class GraphTableauxMachine extends ModelGenerator {
       .toSeq
     )
 
-    changed
+    changed || stepRMForallRule()
   }
 
   /**
