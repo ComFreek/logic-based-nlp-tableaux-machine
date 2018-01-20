@@ -13,6 +13,14 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
     val machine: ModelGenerator = new GraphTableauxMachine()
   }
 
+  // For debugging purposes
+  private def modelToString(model: Model): String = {
+    val interpretation = model.getInterpretation
+    interpretation.keys.map(term => {
+      TermStringHelpers.termToString(term) + ": " + interpretation(term)
+    }).mkString("\n")
+  }
+
   private def genGlobalPredName(name: String): GlobalName = {
     val mpath = MPath(DPath(URI.http colon "test"), new LocalName(List(SimpleStep("test"))))
     GlobalName(mpath, new LocalName(List(SimpleStep(name))))
@@ -198,5 +206,39 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
     machine.feed(termNot(termEq(v("a"), v("c"))))
 
     machine.nextModel() should be (None)
+  }
+
+  it should "propagate equalities across tree heights 1 (i.e. with multiple branches)" in new Machine {
+    machine.feed(termEq(v("a"), v("b")))
+    machine.feed(termEq(v("c"), v("d")))
+
+    machine.feed(termOr(termEq(v("d"), v("a")), termEq(v("c"), v("b"))))
+    machine.feed(termNot(termEq(v("c"), v("a"))))
+
+    machine.nextModel() should be (None)
+  }
+
+  it should "propagate equalities across tree heights 2 (i.e. with multiple branches)" in new Machine {
+    // Mary is the teacher. Peter likes the teacher.
+    machine.feed(termEq(v("mary"), v("the_teacher")))
+    machine.feed(termOr(
+      termEq(v("the_teacher"), v("the_mother")),
+      termEq(v("the_teacher"), v("the_sister"))
+    ))
+    machine.feed(termEq(v("the_writer"), v("the_mother")))
+
+    // Peter likes the teacher. Peter does not like the (his) mother.
+    // => The teacher is the (his) sister.
+    machine.feed(pred2("like", v("peter"), v("the_teacher")))
+    machine.feed(termNot(pred2("like", v("peter"), v("the_mother"))))
+
+    machine.nextModel().get.getInterpretation should be (Map(
+      pred2("like", v("peter"), v("the_mother")) -> false,
+      pred2("like", v("peter"), v("the_writer")) -> false,
+
+      pred2("like", v("peter"), v("the_sister")) -> true,
+      pred2("like", v("peter"), v("the_teacher")) -> true,
+      pred2("like", v("peter"), v("mary")) -> true
+    ))
   }
 }
