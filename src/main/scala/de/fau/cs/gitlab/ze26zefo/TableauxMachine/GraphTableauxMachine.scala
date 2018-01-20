@@ -180,15 +180,15 @@ class GraphTableauxMachine extends ModelGenerator {
     classes.map(s => s.toSet).toSet
   }
 
-  private def stepRMForallRule(): Boolean = {
+  private def stepRMForallRule(node: graph.NodeT): Boolean = {
     // (RM:∀) rule
-    val individualConstants: Set[LocalName] = curNode
+    val individualConstants: Set[LocalName] = node
       .innerNodeTraverser
       .withDirection(Predecessors)
       .flatMap((node: graph.NodeT) => node.terms.flatMap((annotatedTerm: (Term, Boolean)) => annotatedTerm._1.freeVars).toList)
       .toSet
 
-    val forallInducedTerms: Set[(Term, Boolean)] = curNode
+    val forallInducedTerms: Set[(Term, Boolean)] = node
       .innerNodeTraverser
       .withDirection(Predecessors)
       .flatMap((node: graph.NodeT) => node.terms.collect{
@@ -201,7 +201,7 @@ class GraphTableauxMachine extends ModelGenerator {
       .map((_, true)) // Annotate with true
       .toSet
 
-    lazy val allTerms: Set[(Term, Boolean)] = curNode
+    lazy val allTerms: Set[(Term, Boolean)] = node
       .innerNodeTraverser
       .withDirection(Predecessors)
       .flatMap(_.terms)
@@ -209,7 +209,7 @@ class GraphTableauxMachine extends ModelGenerator {
 
     val newTerms = forallInducedTerms diff allTerms
     if (newTerms.nonEmpty) {
-      curNode.terms.append(newTerms.toList : _*)
+      node.terms.append(newTerms.toList : _*)
       true
     }
     else {
@@ -256,7 +256,7 @@ class GraphTableauxMachine extends ModelGenerator {
       // Resolve unresolved (a or b, true) from parents
 
       // 1. Gather all processed ORs on the path from this node up to the root
-      val processedOrs: Set[info.kwarc.mmt.api.objects.Term] = curNode
+      val processedOrs: Set[info.kwarc.mmt.api.objects.Term] = node
         .innerNodeTraverser
         .withDirection(Predecessors)
         .map((node: graph.NodeT) => node.processedOr)
@@ -265,7 +265,7 @@ class GraphTableauxMachine extends ModelGenerator {
         .toSet
 
       // 2. Gather all ORs on the path from this node up to the root
-      val allOrs: Set[info.kwarc.mmt.api.objects.Term] = curNode
+      val allOrs: Set[info.kwarc.mmt.api.objects.Term] = node
         .innerNodeTraverser
         .withDirection(Predecessors)
         .flatMap((node: graph.NodeT) => node.terms.collect { case (a or b, true) => a or b })
@@ -291,14 +291,14 @@ class GraphTableauxMachine extends ModelGenerator {
 
     // Update equivalence sets
     node.equivalenceSets = equivalenceSetsClosure(
-      curNode
+      node
       .innerNodeTraverser
       .withDirection(Predecessors)
       .flatMap((node: graph.NodeT) => node.terms.collect{ case (a Eq b, true) => (a, b) })
       .toSeq
     )
 
-    changed || stepRMForallRule()
+    changed || stepRMForallRule(node)
   }
 
   /**
