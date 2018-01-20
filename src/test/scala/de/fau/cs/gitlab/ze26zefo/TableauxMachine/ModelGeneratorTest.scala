@@ -4,7 +4,7 @@ import info.kwarc.mmt.api._
 import info.kwarc.mmt.api.objects.{OMV, Term}
 import info.kwarc.mmt.api.utils.URI
 import org.scalatest._
-import info.kwarc.gf.Convenience.{Pred1, Pred2, not => termNot, or => termOr}
+import info.kwarc.gf.Convenience.{Pred1, Pred2, not => termNot, or => termOr, Eq => termEq}
 
 import scala.collection.Map
 class ModelGeneratorTest extends FlatSpec with Matchers {
@@ -80,7 +80,7 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
     // (Peter loves Mary and Mary sleeps) or (Peter snores)
     val initialTerm = termOr(and(pred2("love", v("peter"), v("mary")), pred1("sleep", v("mary"))), pred1("snore", v("peter")))
     machine.feed(initialTerm)
-    
+
     // Peter does not love Mary.
     machine.feed(termNot(pred2("love", v("peter"), v("mary"))))
 
@@ -97,5 +97,106 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
       pred1("snore", v("peter")) -> true,
       pred1("sleep", v("mary")) -> true
     ))
+  }
+
+  it should "generate models with Pred1 and Pred2" in new Machine {
+    machine.feed(pred1("like", v("dog")))
+    machine.feed(pred2("kill", v("mouse"), v("something")))
+
+    machine.nextModel().get.getInterpretation should be (Map(
+      pred1("like", v("dog")) -> true,
+      pred2("kill", v("mouse"), v("something")) -> true
+    ))
+
+    machine.feed(termEq(v("hammer"), v("something")))
+
+    machine.nextModel().get.getInterpretation should be (Map(
+      pred1("like", v("dog")) -> true,
+      pred2("kill", v("mouse"), v("something")) -> true,
+      pred2("kill", v("mouse"), v("hammer")) -> true
+    ))
+  }
+
+  it should "propagate one-level equalities with Pred1" in new Machine {
+    machine.feed(termEq(v("a"), v("b")))
+    machine.feed(pred1("like", v("b")))
+
+    machine.nextModel().get.getInterpretation should be (Map(
+      pred1("like", v("a")) -> true,
+      pred1("like", v("b")) -> true
+    ))
+
+    machine.feed(termNot(pred1("like", v("a"))))
+
+    machine.nextModel() should be(None)
+  }
+
+  it should "propagate one-level equalities with Pred2" in new Machine {
+    // Cf. LBS lecture notes, slide 104
+
+    // Mary is the teacher. Peter likes the teacher.
+    machine.feed(termEq(v("mary"), v("the_teacher")))
+    machine.feed(pred2("like", v("peter"), v("the_teacher")))
+
+    // Check whether this entails: Peter likes Mary, i.e.
+    // the negation must lead to a contradiction (on all branches).
+    machine.feed(termNot(pred2("like", v("peter"), v("mary"))))
+
+    machine.nextModel() should be (None)
+  }
+
+  it should "propagate two-level equalities with Pred2" in new Machine {
+    // Cf. LBS lecture notes, slide 104
+
+    // Mary is the teacher. Peter likes the teacher.
+    machine.feed(termEq(v("mary"), v("the_teacher")))
+    machine.feed(termEq(v("the_teacher"), v("the_mother")))
+    machine.feed(pred2("like", v("peter"), v("the_mother")))
+
+    // Check whether this entails: Peter likes Mary, i.e.
+    // the negation must lead to a contradiction (on all branches).
+    machine.feed(termNot(pred2("like", v("peter"), v("mary"))))
+
+    machine.nextModel() should be (None)
+  }
+
+  it should "propagate deep-level equalities" in new Machine {
+    // Cf. LBS lecture notes, slide 104
+
+    // a = b, c = d, b = c
+    // a = c as well
+    machine.feed(termEq(v("a"), v("b")))
+    machine.feed(termEq(v("c"), v("d")))
+    machine.feed(termEq(v("b"), v("c")))
+
+    machine.feed(termNot(termEq(v("a"), v("c"))))
+
+    machine.nextModel() should be (None)
+  }
+
+  it should "propagate deep-level equalities with a big AND" in new Machine {
+    // Cf. LBS lecture notes, slide 104
+
+    // a = b, c = d, b = c
+    // a = c as well
+    val equations: List[Term] = List(
+      ("a", "b"),
+      ("c", "d"),
+      ("b", "c"),
+
+      ("e", "f"),
+      ("g", "h"),
+      ("g", "e")
+    ).map(tuple => termEq(v(tuple._1), v(tuple._2)))
+    machine.feed(equations.reduce((a, b) => and(a, b)))
+
+    // The equivalence classes [a] = {a, b, c, d} and [e] = {e, f, g, h}
+    // are distinct, thus leading to no contradiction.
+    machine.feed(termNot(termEq(v("a"), v("e"))))
+
+    machine.nextModel() should not be None
+    machine.feed(termNot(termEq(v("a"), v("c"))))
+
+    machine.nextModel() should be (None)
   }
 }

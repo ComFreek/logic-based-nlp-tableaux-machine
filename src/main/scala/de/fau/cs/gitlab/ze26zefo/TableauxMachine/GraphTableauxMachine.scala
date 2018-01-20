@@ -1,7 +1,8 @@
 package de.fau.cs.gitlab.ze26zefo.TableauxMachine
 
-import info.kwarc.mmt.api.objects.Term
+import info.kwarc.mmt.api.objects.{OMA, OMV, Term}
 
+import scala.collection.immutable.HashSet
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scalax.collection.GraphEdge.DiEdge
@@ -17,8 +18,12 @@ class GraphTableauxMachine extends ModelGenerator {
     def termToString(term: Term): String = term match {
       case a or b => "(" + termToString(a) + ") v (" + termToString(b) + ")"
       case not(a) => "not(" + termToString(a) + ")"
-      case Pred1(globalName, innerTerm) => globalName.name.steps.last.toPath
-      case _ => ???
+      case Pred1(globalName, arg1) => globalName.name.steps.last.toPath + "(" + termToString(arg1) + ")"
+      case Pred2(globalName, arg1, arg2) =>
+        globalName.name.steps.last.toPath + "((" + termToString(arg1) + "), (" + termToString(arg2) + "))"
+      case a Eq b => "(" + termToString(a) + ") = (" + termToString(b) + ")"
+      case OMV(name) => name.steps.last.toPath
+      case any => any.toString()
     }
 
     def termSeqToString(terms: Seq[(Term, Boolean)]): String = {
@@ -30,6 +35,7 @@ class GraphTableauxMachine extends ModelGenerator {
 
 
   class TableauxColumn(_terms: List[(Term, Boolean)] = Nil) {
+
     import TermStringHelpers._
 
     /**
@@ -47,6 +53,20 @@ class GraphTableauxMachine extends ModelGenerator {
       * @see processedOr
       */
     var processedTerms: mutable.Set[(Term, Boolean)] = mutable.HashSet()
+
+    /**
+      * The equivalence sets induced by all equations of the form (a = b, true)
+      * on the path from node corresponding to this column up to the root.
+      *
+      * Self-mappings are not necessarily stored herein, e.g. if no equations
+      * were ever fed into the machine, equivalenceSets will be an empty set,
+      * even though [a] = {a} for every term a trivially holds.
+      *
+      * This variable is always updated in step().
+      *
+      * @see GraphTableauxMachine.step()
+      */
+    var equivalenceSets: Set[Set[Term]] = HashSet()
 
     /**
       * Every column/corresponding node can only process one (a or b, true) term.
@@ -106,12 +126,76 @@ class GraphTableauxMachine extends ModelGenerator {
 
     !terms.exists((annotatedTerm) =>
       terms.exists((otherAnnotatedTerm) => {
-        annotatedTerm._1 == otherAnnotatedTerm._1 &&
-          annotatedTerm._2 != otherAnnotatedTerm._2
+        if (annotatedTerm._1 == otherAnnotatedTerm._1 &&
+          annotatedTerm._2 != otherAnnotatedTerm._2) {
+          true
+        }
+        else {
+          // Two n-ary predicates pred(c_1, ..., c_n)^T, pred'(d_1, ..., d_n)^F
+          // lead to contradiction iff
+          //  1. pred = pred', i.e. their names are equal
+          //  2. c_i = d_i for all i <=> [c_i] = [d_i] when [.] denotes the equivalence class
+          //     as formed by equivalence terms (a = b). See step().
+          //
+          //     As TableauxColumn#equivalenceSets does not necessarily contain self-mappings, i.e.
+          //     a \in [a] if no equations were ever fed into the machine, we getOrElse(Set[Term](a))
+          //     in all cases.
+          (annotatedTerm, otherAnnotatedTerm) match {
+            case ((Pred1(predName1, arg1), true), (Pred1(predName2, arg2), false)) if predName1.equals(predName2) =>
+              val eqvSets: Set[Set[Term]] = node.equivalenceSets
+              eqvSets.find(_.contains(arg1)).getOrElse(Set[Term](arg1)).contains(arg2)
+            case ((Pred2(predName1, arg11, arg12), true), (Pred2(predName2, arg21, arg22), false)) if predName1.equals(predName2) =>
+              val eqvSets: Set[Set[Term]] = node.equivalenceSets
+              eqvSets.find(_.contains(arg11)).getOrElse(Set[Term](arg11)).contains(arg21) &&
+                eqvSets.find(_.contains(arg12)).getOrElse(Set[Term](arg12)).contains(arg22)
+
+            // = can also be seen as a predicate, with a fixed definition, however.
+            // ("logical constant" as it is the same in every model)
+            case ((Eq(a, b), true), (Eq(c, d), false)) =>
+              val eqvSets: Set[Set[Term]] = node.equivalenceSets
+              eqvSets.find(_.contains(a)).getOrElse(Set[Term](a)).contains(c) &&
+                eqvSets.find(_.contains(b)).getOrElse(Set[Term](b)).contains(d)
+            case _ => false
+          }
+        }
       })
     )
   }
 
+  private def equivalenceSetsClosure(equivalences: Seq[(Term, Term)]): Set[Set[Term]] = {
+    var classes = mutable.ArrayBuffer[mutable.Set[Term]]()
+
+    equivalences.foreach(equation => {
+      val class1 = classes.find(c => c.contains(equation._1))
+      val class2 = classes.find(c => c.contains(equation._2))
+
+      if (class1.isEmpty && class2.isEmpty) {
+        // Add new equivalence class
+        classes.append(mutable.HashSet(equation._1, equation._2))
+      }
+      else if (class1.isDefined && class2.isEmpty) {
+        class1.get.add(equation._2)
+      }
+      else if (class1.isEmpty && class2.isDefined) {
+        class2.get.add(equation._1)
+      }
+      else if (class1.isDefined && class2.isDefined) {
+        if (class1.get == class2.get) {
+          // Nothing to be done
+        }
+        else {
+          // Merge the equivalence classes class1, class2
+          classes = classes.filter(c => c != class1.get && c != class2.get)
+          classes.append(class1.get union class2.get)
+        }
+      }
+      else {
+        assert(false)
+      }
+    })
+
+    classes.map(s => s.toSet).toSet
+  }
 
   /**
     * Do an unspecified number of Tableaux steps in the given node.
@@ -185,20 +269,27 @@ class GraphTableauxMachine extends ModelGenerator {
       }
     }
 
+    // Update equivlance sets
+    node.equivalenceSets = equivalenceSetsClosure(
+      curNode
+      .innerNodeTraverser
+      .withDirection(Predecessors)
+      .flatMap((node: graph.NodeT) => node.terms.collect{ case (a Eq b, true) => (a, b) })
+      .toSeq
+    )
+
     changed
   }
 
   /**
     * Check whether an annotated term is atomic, i.e. it is one of
     * - pred(t_1, ..., t_n), an n-ary predicate
-    * - t_1 = t_2, an equality
     *
     * @author Dennis Müller in his ModelGenerator.
     */
   private def isAtomic(tm: (Term, Boolean)) = tm match {
     case (Pred1(_, a), _) => true
     case (Pred2(_, a, b), _) => true
-    case (a Eq b, _) => true
     case _ => false
   }
 
@@ -214,7 +305,25 @@ class GraphTableauxMachine extends ModelGenerator {
     val atomicTerms: List[(Term, Boolean)] = List(
       curNode.outerNodeTraverser.withDirection(Predecessors).flatMap(_.terms.filter(isAtomic _))
     ).flatten
-    val interpretation = atomicTerms.map(x => x._1 -> x._2).toMap
+
+    // Add (=) closure, cf. LBS lecture notes, slide 103 ("PL_NQ^=: Adding equality to PL_NQ")
+    val closuredAtomicTerms: Seq[(Term, Boolean)] = atomicTerms.flatMap((tm: (Term, Boolean)) => tm match {
+      case (Pred1(predName, arg1), sgn) =>
+        originNode.equivalenceSets.find(s => s.contains(arg1)).getOrElse(Set(arg1)).map(equivalentConstant =>
+          (Pred1(predName, equivalentConstant), sgn)
+        )
+
+      case (Pred2(predName, arg1, arg2), sgn) =>
+        originNode.equivalenceSets.find(s => s.contains(arg1)).getOrElse(Set(arg1)).flatMap(equivalentConstant1 =>
+          originNode.equivalenceSets.find(s => s.contains(arg2)).getOrElse(Set(arg2)).map(equivalentConstant2 =>
+            (Pred2(predName, equivalentConstant1, equivalentConstant2), sgn)
+          )
+        )
+
+      case _ => List(tm)
+    })
+
+    val interpretation = closuredAtomicTerms.map(x => x._1 -> x._2).toMap
 
     new Model {
       def getInterpretation: Map[Term, Boolean] = {
@@ -271,6 +380,7 @@ class GraphTableauxMachine extends ModelGenerator {
 
   /**
     * Generates the next model if it exists.
+    *
     * @return
     */
   @Override
