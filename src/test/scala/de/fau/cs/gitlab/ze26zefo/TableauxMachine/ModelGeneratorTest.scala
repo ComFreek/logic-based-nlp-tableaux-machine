@@ -372,7 +372,7 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
     machine.nextModel() should be (None)
   }
 
-  it should "cope with nested forall quantifiers" in new Machine {
+  it should "cope with nested forall quantifiers (prenex normal form)" in new Machine {
     // Cf. LBS lecture notes, slide 149.
 
     // Peter is a man.
@@ -388,6 +388,35 @@ class ModelGeneratorTest extends FlatSpec with Matchers {
           imp(
             and(pred1("man", c("x")), pred1("woman", c("y"))),
             pred2("like", c("x"), c("y"))
+          )
+        )
+      )
+    )
+
+    machine.feed(termNot(pred2("like", c("peter"), c("mary"))))
+
+    machine.nextModel() should be (None)
+  }
+
+  it should "cope with nested forall quantifiers (no prenex normal form)" in new Machine {
+    // Cf. LBS lecture notes, slide 149.
+
+    // Peter is a man.
+    machine.feed(pred1("man", c("peter")))
+
+    // Mary is a woman.
+    machine.feed(pred1("woman", c("mary")))
+
+    // Every man likes very woman.
+    machine.feed(
+      forall("x",
+        imp(
+          pred1("man", c("x")),
+          forall("y",
+            imp(
+              pred1("woman", c("y")),
+              pred2("like", c("x"), c("y"))
+            )
           )
         )
       )
