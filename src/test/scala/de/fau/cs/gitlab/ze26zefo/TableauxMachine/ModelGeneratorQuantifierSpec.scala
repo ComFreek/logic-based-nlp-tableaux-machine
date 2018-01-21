@@ -1,6 +1,7 @@
 package de.fau.cs.gitlab.ze26zefo.TableauxMachine
 
 import info.kwarc.gf.Convenience.{Eq => termEq, not => termNot, or => termOr}
+import org.scalatest.tagobjects.Slow
 
 import scala.collection.Map
 
@@ -47,22 +48,52 @@ class ModelGeneratorQuantifierSpec extends ModelGeneratorSpec {
   }
 
   /**
-    * This test runs very long (> 2min at least).
-    * Might stem from the combinatorial explosion.
+    * This test runs in about 30s.
     */
-  ignore should "Multiple forall quantifiers" in new Machine {
-    // Cf. LBS lecture notes, slide 149.
-
+  it should "instantiate nested forall quantifiers" taggedAs Slow in new Machine {
     // Peter is a man.
     machine.feed(pred1("man", c("peter")))
 
     // The teacher is a woman.
     machine.feed(pred1("woman", c("the_teacher")))
 
-    // The sister = The teacher = Mary, who is a woman.
-    machine.feed(termEq(c("the_sister"), c("the_teacher")))
-    machine.feed(termEq(c("mary"), c("the_sister")))
+    // The teacher = Mary, who is a woman.
+    machine.feed(termEq(c("mary"), c("the_teacher")))
     machine.feed(pred1("woman", c("mary")))
+
+    // Every man likes very woman.
+    machine.feed(
+      forall("x",
+        forall("y",
+          imp(
+            and(pred1("man", c("x")), pred1("woman", c("y"))),
+            pred2("like", c("x"), c("y"))
+          )
+        )
+      )
+    )
+
+    machine.feed(termNot(pred2("like", c("peter"), c("mary"))))
+
+    machine.nextModel() should be (None)
+  }
+
+  /**
+    * This test runs in about 60-70s.
+    *
+    * It is the same as "instantiate nested forall quantifiers" except that we do
+    * not feed anymore that Mary is a woman. This has to be inferred from the fact
+    * that the teacher (= Mary) is a woman.
+    */
+  it should "instantiate nested forall quantifiers and resolve equalities" taggedAs Slow in new Machine {
+    // Peter is a man.
+    machine.feed(pred1("man", c("peter")))
+
+    // The teacher is a woman.
+    machine.feed(pred1("woman", c("the_teacher")))
+
+    // The teacher = Mary, who is a woman.
+    machine.feed(termEq(c("mary"), c("the_teacher")))
 
     // Every man likes very woman.
     machine.feed(
