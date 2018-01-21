@@ -16,3 +16,5 @@ Implemented as an exercise for the course ["Logik-Basierte Sprachverarbeitung" (
 - If tests are failing and manual comparisons between models (i.e. between Maps) is cumbersome, you can temporarily use the following code:
 
       println(modelToString(machine.nextModel().get))
+
+- The test files and their classes must be suffixed with `*Spec`, otherwise `sbt test` might not run all of them.
