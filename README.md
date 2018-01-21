@@ -7,7 +7,9 @@ Implemented as an exercise for the course ["Logik-Basierte Sprachverarbeitung" (
 1. Clone
 2. If you are not using Windows: add the compiled GF `*.so` libraries in `lib/`.
 3. Install [SBT](https://www.scala-sbt.org/) if you do not have it already installed. (Check `sbt` on the command line.)
-4. Run `sbt` in the root directory and then enter `test`.
+4. Run `sbt` in the root directory and then enter
+   - `test` for all tests (might run several minutes)
+   - `testOnly -- -l org.scalatest.tags.Slow` to exclude slow tests.
 
 
 ## Developing
