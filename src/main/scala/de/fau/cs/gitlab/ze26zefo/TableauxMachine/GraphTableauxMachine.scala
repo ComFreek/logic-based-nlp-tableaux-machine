@@ -433,4 +433,50 @@ class GraphTableauxMachine extends ModelGenerator {
 
     None
   }
+
+  /**
+    * Generates a fully self-contained LaTeX .tex document which shows
+    * the current state of the graph.
+    *
+    * @return The LaTeX document as a string.
+    */
+  def generateLatexDocument(): String = {
+    val latexHeader = """% Template copied from https://tex.stackexchange.com/a/282192
+%
+% @author cfr <https://tex.stackexchange.com/users/39222/cfr>
+% @license CC BY-SA 3.0 with attribution required <https://creativecommons.org/licenses/by-sa/3.0/>
+\\documentclass[tikz,border=10pt]{standalone}
+\\usepackage{forest}
+\\forestset{
+  smullyan tableaux/.style={
+    for tree={
+      math content,
+      parent anchor=south,
+      child anchor=north,
+    },
+    where n children=1{
+      !1.before computing xy={l=\\baselineskip},
+      !1.no edge
+    }{},
+  },
+}
+\\begin{document}
+\\begin{forest}"""
+
+    latexHeader + generateLatexFromNode(root) + "\\end{forest}\\end{document}"
+  }
+
+  def generateLatexFromNode(node: graph.NodeT): String = {
+    val nodeTermContents: List[String] = node.terms.map((annotatedTerm: (Term, Boolean)) => {
+      "{" + TermStringHelpers.termToLatex(annotatedTerm._1) + "}^" + (if (annotatedTerm._2) "T" else "F")
+    }).toList
+
+    val nodeContents = nodeTermContents ++ (if (node.isClosed) List("\\bot") else Nil)
+
+    "%s%s%s".format(
+      nodeContents.map(s => "[" + s).mkString("\n"),
+      node.diSuccessors.map(generateLatexFromNode).mkString(" "),
+      "]" * nodeContents.size
+    )
+  }
 }
