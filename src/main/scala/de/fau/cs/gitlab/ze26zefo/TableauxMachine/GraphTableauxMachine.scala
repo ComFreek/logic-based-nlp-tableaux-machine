@@ -441,13 +441,17 @@ class GraphTableauxMachine extends ModelGenerator {
     * @return The LaTeX document as a string.
     */
   def generateLatexDocument(): String = {
+
+    // \ u005c\ u0075 (without the spaces) is a necessary encoding for "\ u" because Scala treats
+    // Unicode escape sequences at the parser level, thus also in raw strings:
+    // https://stackoverflow.com/q/24058549
     val latexHeader = """% Template copied from https://tex.stackexchange.com/a/282192
 %
 % @author cfr <https://tex.stackexchange.com/users/39222/cfr>
 % @license CC BY-SA 3.0 with attribution required <https://creativecommons.org/licenses/by-sa/3.0/>
-\\documentclass[tikz,border=10pt]{standalone}
-\\usepackage{forest}
-\\forestset{
+\documentclass[tikz,border=10pt]{standalone}
+\u005c\u0075sepackage{forest}
+\forestset{
   smullyan tableaux/.style={
     for tree={
       math content,
@@ -455,13 +459,15 @@ class GraphTableauxMachine extends ModelGenerator {
       child anchor=north,
     },
     where n children=1{
-      !1.before computing xy={l=\\baselineskip},
+      !1.before computing xy={l=\baselineskip},
       !1.no edge
     }{},
   },
 }
-\\begin{document}
-\\begin{forest}"""
+\begin{document}
+\begin{forest}
+  smullyan tableaux
+"""
 
     latexHeader + generateLatexFromNode(root) + "\\end{forest}\\end{document}"
   }

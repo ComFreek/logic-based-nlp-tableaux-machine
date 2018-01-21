@@ -18,15 +18,19 @@ object TermStringHelpers {
   }
 
   def termToLatex(term: Term): String = term match {
-    case not(a) or b => termToLatex(a) + " \\rightarrow " + termToLatex(b)
+    // We could potentially catch implications here as "case not(a) or b", but
+    // actually, they did not make the resulting LaTeX output any clearer.
+
     case a or b => termToLatex(a) + " \\lor " + termToLatex(b)
-    case not(a) => "\\lnot " + termToLatex(a)
+    case not(a) => "\\lnot \\left(" + termToLatex(a) + "\\right)"
     case Pred1(globalName, arg1) => globalName.name.steps.last.toPath + "\\left(" + termToLatex(arg1) + "\\right)"
     case Pred2(globalName, arg1, arg2) =>
       globalName.name.steps.last.toPath + "\\left(" + termToLatex(arg1) + ", " + termToLatex(arg2) + "\\right)"
     case a Eq b => termToLatex(a) + " = " + termToLatex(b)
     case forall(variable, innerTerm) => "\\forall " + variable.steps.last.toPath + "\\left(" + termToLatex(innerTerm) + "\\right)"
-    case any => any.toStr(true)
+
+    // Underscores need to be escaped inside \textrm
+    case any => "\\textrm{" + any.toStr(true).replace("_", "\\_") + "}"
   }
 
   def termSeqToString(terms: Seq[(Term, Boolean)]): String = {
