@@ -61,6 +61,33 @@ class GraphTableauxMachine extends ModelGenerator {
     var processedOr: Option[Term] = None
 
     /**
+      * If the corresponding node ands its children deals with an existential quantifier,
+      * it is stored herein.
+      *
+      * The LocalName tuple field is the quantified variable (e.g. LocalName(SimpleStep("x")))
+      * and the Term tuple field is the inner term, which might mention the quantified variable.
+      */
+    var processedExistentialQuantifier: Option[(LocalName, Term)] = None
+
+    /**
+      * If processedExistentialQuantifier is populated, this set keeps track of the individual
+      * constants with which the existential quantifier has been instantiiated.
+      */
+    val processedExistentialConstants: mutable.Set[LocalName] = mutable.HashSet()
+
+    /**
+      * If processedExistentialQuantifier is populated, this flag keeps track whether we have
+      * yet instantiiated the existential quantifier with a freshly created individual constant.
+      *
+      * This is useful in the following case:
+      *
+      * If all branches of a node with a processed existential quantifier close and we already used
+      * a fresh individual constant, we can conclude that the existential quantifier leads to a
+      * contradiction.
+      */
+    var usedFreshExistentialConstants: Boolean = false
+
+    /**
       * Flag whether this column has been closed yet, i.e. whether there is a
       * contradiction among the set of terms on the path from the node
       * corresponding to this column up to the root.
@@ -78,6 +105,11 @@ class GraphTableauxMachine extends ModelGenerator {
     * The current tableaux column. It might be either closed or saturated or none of them (i.e. still open).
     */
   private var curNode: graph.NodeT = graph.nodes.head
+
+  /**
+    * Store the assigned fresh individiual constants in the course of (RM: \exists) applications.
+    */
+  private val freshIndividualConstants: mutable.Set[LocalName] = mutable.HashSet[LocalName]()
 
   override def feed(term: Term): Unit = {
     feedAnnotated((term, true))
@@ -180,13 +212,17 @@ class GraphTableauxMachine extends ModelGenerator {
     classes.map(s => s.toSet).toSet
   }
 
-  private def stepRMForallRule(node: graph.NodeT): Boolean = {
-    // (RM:∀) rule
-    val individualConstants: Set[LocalName] = node
+  private def collectIndividualConstants(node: graph.NodeT): Set[LocalName] = {
+    node
       .innerNodeTraverser
       .withDirection(Predecessors)
       .flatMap((node: graph.NodeT) => node.terms.flatMap((annotatedTerm: (Term, Boolean)) => annotatedTerm._1.freeVars).toList)
       .toSet
+  }
+
+  private def stepRMForallRule(node: graph.NodeT): Boolean = {
+    // (RM:∀) rule
+    val individualConstants = collectIndividualConstants(node)
 
     val forallInducedTerms: Set[(Term, Boolean)] = node
       .innerNodeTraverser
@@ -252,7 +288,7 @@ class GraphTableauxMachine extends ModelGenerator {
       termIndex = termIndex + 1
     }
 
-    if (node.processedOr.isEmpty) {
+    if (node.diSuccessors.isEmpty && node.processedOr.isEmpty) {
       // Resolve unresolved (a or b, true) from parents
 
       // 1. Gather all processed ORs on the path from this node up to the root
@@ -298,7 +334,131 @@ class GraphTableauxMachine extends ModelGenerator {
       .toSeq
     )
 
-    changed || stepRMForallRule(node)
+    if (changed) {
+      return true
+    }
+
+    // Only apply (RM: \forall) if no other rule was applicable. (This is an optional design decision.)
+    if (stepRMForallRule(node)) {
+      return true
+    }
+    // Only apply (RM: \exists) if no other rule was applicable,
+    // so that existential quantifiers are only resolved (actually created) at leafs.
+    // Their branches (apart from the first one) are created in backtrackToUnclosed.
+
+    if (node.processedExistentialQuantifier.isEmpty && node.diSuccessors.isEmpty) {
+      return tryBeginningOfRMExistsRule(node)
+    }
+
+    false
+  }
+
+  /**
+    * Begin a *new* (RM: \exists) rule application on a node. The \exists quantifier
+    * is taken from a (potentially far away) predecessor node.
+    *
+    * The passed node must not have any children yet and its corresponding TableauxColumn
+    * object must not have its TableauxColumn.processedExistentialQuantifier set.
+    *
+    * If a yet unprocessed existential quantifier is found in any predecessor node, it is
+    * marked as processed in the passed node and (RM: \exists) is applied *once*.
+    * Hence, only one child branch (with either an existent individual constant
+    * or a freshly created constant if the former doesn't exist) is created. More branches
+    * are added in backtrackToUnclosed(), namely when the previous branches all got closed
+    * and we backtrack.
+    *
+    * @return True if (RM: \exists) could be applied. That is the case iff. an unprocessed
+    *         existential quantifier could be found in a predecessor node. Otherwise, False
+    *         is returned and it is guaranteed that no changed have been made anywhere.
+    */
+  private def tryBeginningOfRMExistsRule(node: graph.NodeT): Boolean = {
+    assert(node.processedExistentialQuantifier.isEmpty)
+    assert(node.diSuccessors.isEmpty)
+
+    val existentialQuantifiers: Set[(LocalName, Term)] =
+      node
+        .innerNodeTraverser
+        .withDirection(Predecessors)
+        .flatMap((node: graph.NodeT) => node.terms.collect {
+          case (forall(x, innerTerm), false) => (x, innerTerm).asInstanceOf[(LocalName, Term)]
+        })
+        .toSet
+
+    val processedExistentialQuantifiers: Set[(LocalName, Term)] =
+      node
+        .innerNodeTraverser
+        .withDirection(Predecessors)
+        .map((node: graph.NodeT) => node.processedExistentialQuantifier)
+        .filter(_.isDefined)
+        .map(_.get)
+        .toSet
+
+    val unprocessedExistentialQuantifiers = existentialQuantifiers diff processedExistentialQuantifiers
+
+    if (unprocessedExistentialQuantifiers.nonEmpty) {
+      // Pick an arbitrary one
+      val existentialQuantifier = unprocessedExistentialQuantifiers.head
+      node.processedExistentialQuantifier = Some(existentialQuantifier)
+
+      oneStepRMExistential(node)
+      true
+    }
+    else {
+      false
+    }
+  }
+
+  /**
+    * Create a new fresh individual constant, register it at
+    * GraphTableauxMachine.freshIndividualConstants and return it.
+    *
+    * This method is inherently not thread-safe.
+    *
+    * @return The new fresh individual constant. Its name is implementation-defined.
+    */
+  private def createFreshIndividualConstant(): LocalName = {
+    val name = LocalName(SimpleStep("fresh" + freshIndividualConstants.size))
+    freshIndividualConstants.add(name)
+    name
+  }
+
+  /**
+    * Perform one step of (RM: \exists) on a given node assuming an existential quantifier has already been
+    * chosen to be processed.
+    *
+    * @param node The node to perform the step on. The corresponding TableauxColumn must have its
+    *             processedExistentialQuantifier field filled. The field
+    *             processedExistentialConstants can be empty, though, as is the case at the
+    *             beginning of a new (RM: \exists) application.
+    * @return The new child with a one-element tableaux, namely with the term introduced by (RM: \exists).
+    */
+  private def oneStepRMExistential(node: graph.NodeT): graph.NodeT = {
+    assert(node.processedExistentialQuantifier.isDefined)
+
+    assert(!node.usedFreshExistentialConstants, "Application of (RM: \\exists) even though we" +
+      "already have a fresh existential constant branch. If that branch has been closed, no" +
+      "other fresh branch could be saturated without closing.")
+
+    val unprocessedIndividualConstants = collectIndividualConstants(node) diff node.processedExistentialConstants
+
+    val constant = if (unprocessedIndividualConstants.nonEmpty) {
+      unprocessedIndividualConstants.head
+    } else {
+      node.usedFreshExistentialConstants = true
+      createFreshIndividualConstant()
+    }
+
+    node.processedExistentialConstants.add(constant)
+
+    val existentialQuantifier: (LocalName, Term) = node.processedExistentialQuantifier.get
+
+    val substitution: Term = existentialQuantifier._2.substitute(
+      Substitution(Sub(existentialQuantifier._1, OMV(constant)))
+    )(PlainSubstitutionApplier)
+
+    // (RM: \exists) rule
+    val newExistenceChild = new TableauxColumn(List((substitution, false)))
+    graph.addAndGet(node.value ~> newExistenceChild).to
   }
 
   /**
@@ -381,13 +541,32 @@ class GraphTableauxMachine extends ModelGenerator {
 
       val unclosedChildren = curNode.diSuccessors.filter(!_.isClosed)
       if (unclosedChildren.isEmpty) {
-        // All children are closed, so we can close curNode as well
-        curNode.isClosed = true
-        if (parent(curNode).isEmpty) {
-          // The root itself has been just closed
-          return None
+        // Only closed children (>= 1 children, though) and we do not have an infinitely spawning
+        // existential quantifier node at hand
+        if (curNode.processedExistentialQuantifier.isEmpty) {
+          curNode.isClosed = true
+          if (parent(curNode).isEmpty) {
+            // The root itself has been just closed
+            return None
+          }
+          curNode = parent(curNode).get
         }
-        curNode = parent(curNode).get
+        else {
+          // If we already have used a fresh existential constant and that branch
+          // apparently closed (otherwise we would have unclosedChildren.nonEmpty),
+          // the existential quantifier leads itself to a contradiction.
+          if (curNode.usedFreshExistentialConstants) {
+            curNode.isClosed = true
+            if (parent(curNode).isEmpty) {
+              // The root itself has been just closed
+              return None
+            }
+            curNode = parent(curNode).get
+          }
+          else {
+            curNode = oneStepRMExistential(curNode)
+          }
+        }
       }
       else {
         // Descend to a "random"/unspecified open child

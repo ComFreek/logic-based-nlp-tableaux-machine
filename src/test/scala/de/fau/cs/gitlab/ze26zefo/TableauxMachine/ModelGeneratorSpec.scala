@@ -43,8 +43,14 @@ abstract class ModelGeneratorSpec extends FlatSpec with Matchers {
     Pred2(genGlobalPredName(name), arg1, arg2)
   }
 
-  protected def and(term1: Term, term2: Term): Term = {
+  private def and2(term1: Term, term2: Term): Term = {
     termNot(termOr(termNot(term1), termNot(term2)))
+  }
+
+  protected def and(terms: Term*): Term = {
+    terms.reduce((term1, term2) => {
+      and2(term1, term2)
+    })
   }
 
   protected def imp(term1: Term, term2: Term): Term = {
