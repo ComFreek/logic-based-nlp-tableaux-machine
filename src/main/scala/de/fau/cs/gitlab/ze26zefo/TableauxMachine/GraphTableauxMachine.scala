@@ -1,9 +1,7 @@
 package de.fau.cs.gitlab.ze26zefo.TableauxMachine
 
-import info.kwarc.gf.Convenience.{Eq, Pred1, Pred2, forall, not, or}
 import info.kwarc.mmt.api._
 import info.kwarc.mmt.api.objects._
-import info.kwarc.mmt.api.utils.URI
 
 import scala.collection.immutable.HashSet
 import scala.collection.mutable
@@ -13,10 +11,73 @@ import scalax.collection.GraphPredef._
 import scalax.collection.GraphTraversal.Predecessors
 import scalax.collection.mutable.Graph
 
+/**
+  * A FOL model generator based on a Tableaux calculus working on trees.
+  *
+  * Supported rules are:
+  * - (∨E): `(a ∨ b)^T`
+  * - `(a ∨ b)^F`
+  * - `(a = b)^T` in conjunction with `ϕ = ψ`, of them containing `a` or `b`.
+  * - (RM: ∀): `(∀x.ϕ)^T`
+  * - (RM: ∃): `(∀x. ϕ)^F`
+  *
+  * <h2>General introduction</h2>
+  *
+  * Each node in the tree (in the following subsumed under 'graph') corresponds
+  * to a list of terms with some additional attributes (a TableauxColumn instance).
+  * Initially, the graph only consists of one root node which gets all the terms
+  * you feed into the machine.
+  * Some of the above mentioned rules have the property that they branch. For example,
+  * the `(a ∨ b)^T` rule will branch into exactly two branches on the node where the term
+  * it is applied on is contained. The left branch, a new TableauxColumn, will contain a,
+  * and the right branch, a new TableauxColumn as well, will contain b.
+  * Multiple children of a node generally indicate different world conditions (i.e. models)
+  * which might be true.
+  *
+  * This implementation applies the rule exhaustively until the first model is found upon
+  * nextModel() calls. Note that this is actually implementation-defined and might well
+  * happen in feed() instead.
+  *
+  * <h2>Specifics</h2>
+  *
+  * <h3>Branching</h3>
+  *
+  * The branching rules are:
+  *
+  * - (∨E)
+  * - (RM: ∃)
+  *
+  * If a branching rule is applied on a node, the branching "interface" and the children of
+  * this node are implicitly reserved for the used term. On a single node, never are two or
+  * more applications of (∨E), (RM: ∃) or combinations thereof performed.
+  *
+  * This means that upon the machine working in lower nodes in the tree unprocessed instances
+  * of branching rules in upper nodes need to be checked as well. Especially, a term which a
+  * branching rule is applied on need not be in the same node where the branching occurs.
+  *
+  * Instances of TableauxColumn save the information on the applied branching rule. Unprocessed
+  * terms (i.e. ORs or existential quantifiers) are queried on-the-fly from upper nodes in
+  * GraphTableauxMachine's internal method.
+  *
+  * <h3>Keeping track of the current node</h3>
+  *
+  * The class keeps track of a `curNode` variable referring to the current node of inspection
+  * inside the graph.
+  * nextModel() and step() are built around the idea that, starting from the root, we always
+  * first saturate the current node before stepping down to one of its children. By this means,
+  * we can make use of GraphTableauxMachine.isConsistent() which does not perform steps
+  * anymore, but checks for consistency in a "naive" way. Cf. its documentation on formalization
+  * on "native".
+  */
 class GraphTableauxMachine extends ModelGenerator {
 
   import info.kwarc.gf.Convenience._
 
+  /**
+    * Instances of this class correspond 1:1 to nodes in the graph. They save a
+    * list of terms.
+    * @see GraphTableauxMachine
+    */
   class TableauxColumn(_terms: List[(Term, Boolean)] = Nil) {
 
     import TermStringHelpers._
@@ -111,10 +172,18 @@ class GraphTableauxMachine extends ModelGenerator {
     */
   private val freshIndividualConstants: mutable.Set[LocalName] = mutable.HashSet[LocalName]()
 
+  /**
+    * Feed a new term into the machine, which is annotated with True.
+    *
+    * @see feedAnnotated
+    */
   override def feed(term: Term): Unit = {
     feedAnnotated((term, true))
   }
 
+  /**
+    * Feed a new annotated term into the machine.
+    */
   private def feedAnnotated(input: (Term, Boolean)): Unit = {
     // Currently, we always feed new inputs to the root node
     // because of two reasons:
@@ -130,6 +199,28 @@ class GraphTableauxMachine extends ModelGenerator {
     curNode = root
   }
 
+  /**
+    * Check whether all terms in a given node, and optionally all those found on the path
+    * up to the root, form a "naive" consistent set of terms.
+    *
+    * A set of terms is "native" consistent iff. it doesn't contain annotated formulae
+    * φ^s and ψ^t with:
+    *
+    * 1. different annotations: s != t
+    * 2. and φ = ψ syntactically or up to replacements of individual constants deemed equivalent.
+    *    Individual constants are deemed equivalent iff. they are both in the same equivalence set
+    *    induced by all equality terms occurring in the node (or optionally on the path up to the root).
+    *
+    * For this method to be useful with, you have to saturate the node (and optionally all
+    * nodes on the path up to the root) before calling it.
+    *
+    * @see equivalenceSetsClosure
+    *
+    * @param node The node to inspect.
+    * @param inspectUpToRoot If True, the node itself and all the nodes on the path up to the root are
+    *                        inspected as a whole.
+    * @return True iff. the terms form a "native" consistent set of terms.
+    */
   private def isConsistent(node: graph.NodeT, inspectUpToRoot: Boolean): Boolean = {
     lazy val allTermsToRoot = node
       .innerNodeTraverser
@@ -177,6 +268,19 @@ class GraphTableauxMachine extends ModelGenerator {
     )
   }
 
+  /**
+    * Form the equivalence sets of the equivalence set closure of the passed equivalence.
+    *
+    * The equivalence set closure closes the passed equivalences with respect to
+    * i) symmetry, ii) reflexivity, and iii) transivity.
+    *
+    * For example, if you pass ((a, b), (c, d), (b, d), (e, f), (g, h), (e, h)), the
+    * equivalence sets will be {a, b, c, d} and {e, f, g, h}.
+    *
+    * @param equivalences The equivalences as a set of tuples, i.e. each tuple corresponds
+    *                     to an equality.
+    * @return All equivalence sets.
+    */
   private def equivalenceSetsClosure(equivalences: Seq[(Term, Term)]): Set[Set[Term]] = {
     var classes = mutable.ArrayBuffer[mutable.Set[Term]]()
 
@@ -212,6 +316,11 @@ class GraphTableauxMachine extends ModelGenerator {
     classes.map(s => s.toSet).toSet
   }
 
+  /**
+    * Collect all individual constants occurring on the path from the passed node
+    * up to the root.
+    * Individual constants are exactly the free variables of the terms.
+    */
   private def collectIndividualConstants(node: graph.NodeT): Set[LocalName] = {
     node
       .innerNodeTraverser
@@ -512,6 +621,10 @@ class GraphTableauxMachine extends ModelGenerator {
     }
   }
 
+  /**
+    * Get the parent of a node as an optional value.
+    * (It is assumed that node only has one predecessor.)
+    */
   private def parent(node: graph.NodeT): Option[graph.NodeT] = {
     node.diPredecessors.toSeq.headOption
   }
@@ -578,9 +691,9 @@ class GraphTableauxMachine extends ModelGenerator {
   }
 
   /**
-    * Generates the next model if it exists.
+    * Generate the next model if it exists.
     *
-    * @return
+    * @return A populated Option if a model exists and None otherwise.
     */
   @Override
   override def nextModel(): Option[Model] = {
@@ -614,8 +727,10 @@ class GraphTableauxMachine extends ModelGenerator {
   }
 
   /**
-    * Generates a fully self-contained LaTeX .tex document which shows
+    * Generate a fully self-contained LaTeX .tex document which shows
     * the current state of the graph.
+    *
+    * Internally, the LaTeX package "forest" is used.
     *
     * @return The LaTeX document as a string.
     */
@@ -651,7 +766,16 @@ class GraphTableauxMachine extends ModelGenerator {
     latexHeader + generateLatexFromNode(root) + "\\end{forest}\\end{document}"
   }
 
-  def generateLatexFromNode(node: graph.NodeT): String = {
+  /**
+    * Generate recursively LaTeX code for use inside a \begin{forest}\end{forest}
+    * environment in conjunction with the LaTeX "forest" package.
+    *
+    * @param node The node to start from. The graph reachable from this ndoe must
+    *             be a tree and must not contain loops. Otherwise, this method
+    *             will run into an infinite loop.
+    * @return LaTeX code for use inside a "forest" environment.
+    */
+  private def generateLatexFromNode(node: graph.NodeT): String = {
     val nodeTermContents: List[String] = node.terms.map((annotatedTerm: (Term, Boolean)) => {
       "{" + TermStringHelpers.termToLatex(annotatedTerm._1) + "}^" + (if (annotatedTerm._2) "T" else "F")
     }).toList
