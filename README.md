@@ -27,7 +27,12 @@ Supported rules:
    - `testOnly -- -l org.scalatest.tags.Slow` to exclude slow tests.
 
 2. For every run test corresponding LaTeX files with the tableaux graph will be
-created in the directory `test-models-output/latex`.<br><br>
+created in the directory `test-models-output/latex`.
+
+   You can use the LaTeX distribution of your choice, the generated code is supposed to
+   be very portable. If you have `latexmk` at your fingertips, you can run `latexmk -pdf`
+   in every suite subdirectory to automatically generate the PDFs.
+     
    Note that due to the use of the specific LaTeX package for the visualizations,
    nodes with one child do not display their branch visually, they are simply
    concatenated. This might happen in conjunction with (RM: ∃).
