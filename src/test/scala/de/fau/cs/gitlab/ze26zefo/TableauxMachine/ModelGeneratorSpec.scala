@@ -23,19 +23,32 @@ import info.kwarc.gf.Convenience.{Pred1, Pred2, forall => termForall, not => ter
   * </code>
   *
   * If TRACK_TEST_MODELS_LATEX is set, in each test upon a call of nextModel(), the
-  * model is generated, intercepted and exported as a LaTeX file in the paths
-  * given by TEST_MODELS_DIR and TEST_MODELS_LATEX_DIR. The LaTeX file name depends
-  * on the test name.
+  * model is generated, intercepted and the current graph representation (assumes
+  * GraphTableauxMachine) of the machine xported as a LaTeX file.
+  * The file will be placed into
+  * {TEST_MODELS_LATEX_DIR}/{suite name}/{test name}-{nextModel() count}.tex
+  *
+  * E.g. in a suite "ABC" and a test "DEF" you perform two nextModel() calls, then
+  * {TEST_MODELS_LATEX_DIR}/ABC/DEF-{1,2}.tex will be generated.
   */
-abstract class ModelGeneratorSpec extends FlatSpec with Matchers {
+abstract class ModelGeneratorSpec extends FlatSpec with Matchers with BeforeAndAfterAll {
 
   private val TRACK_TEST_MODELS_LATEX = true
   private val TEST_MODELS_DIR = Paths.get("test-models-output")
   private val TEST_MODELS_LATEX_DIR = TEST_MODELS_DIR.resolve("latex")
 
+  /**
+    * Trait providing a ModelGenerator machine instance, which exports its graph after every
+    * intercepted nextModel() call.
+    * See ModelGeneratorSpec's class documentation for more details on the export path.
+    */
   trait Machine {
     private val actualMachine: GraphTableauxMachine = new GraphTableauxMachine()
-    private var nextModelCounter = 1
+
+    /***
+      * Count the number of nextModel() calls to form the filename upon the next call.
+      */
+    private var nextModelCounter = 0
 
     val machine: ModelGenerator = if (TRACK_TEST_MODELS_LATEX) {
       new ModelGenerator {
@@ -46,9 +59,13 @@ abstract class ModelGeneratorSpec extends FlatSpec with Matchers {
         override def nextModel(): Option[Model] = {
           val model = actualMachine.nextModel()
 
-          // Escape for filename use
+          val escapedSuiteName = _currentSuiteName.get().replace("\\W+", "")
+          val suiteDirectory = TEST_MODELS_LATEX_DIR.resolve(escapedSuiteName)
+
+          suiteDirectory.toFile.mkdirs()
+
           val escapedTestName = _currentTestName.get().replaceAll("[^\\w ]+", "").replace(' ', '-')
-          val latexFile = TEST_MODELS_LATEX_DIR.resolve(escapedTestName + "-" + nextModelCounter + ".tex")
+          val latexFile = suiteDirectory.resolve(escapedTestName + "-" + (nextModelCounter + 1) + ".tex")
 
           Files.write(
             latexFile,
@@ -65,7 +82,19 @@ abstract class ModelGeneratorSpec extends FlatSpec with Matchers {
     }
   }
 
-  // Save the current test name to use in LaTeX export upon nextModel()
+  private val _currentSuiteName = new ThreadLocal[String]
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    _currentSuiteName.set(suiteName)
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    _currentSuiteName.set(null)
+  }
+
+    // Save the current test name to use in LaTeX export upon nextModel()
   //
   // Copied from https://stackoverflow.com/a/36766748
   // Author: Alexey Romanov <https://stackoverflow.com/users/9204/alexey-romanov>
@@ -73,6 +102,7 @@ abstract class ModelGeneratorSpec extends FlatSpec with Matchers {
   private val _currentTestName = new ThreadLocal[String]
 
   override def withFixture(test: NoArgTest): Outcome = {
+    print(test.scopes)
     _currentTestName.set(test.name)
     val outcome = super.withFixture(test)
     _currentTestName.set(null)
