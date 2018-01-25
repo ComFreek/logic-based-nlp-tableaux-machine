@@ -14,11 +14,19 @@ import info.kwarc.mmt.api.objects.Term
 trait ModelGenerator {
   /**
     * Feed a new term into the machine, which is annotated with True.
+    *
+    * No guarantees are made on the runtime complexity of this function.
+    * Implementations are free to perform computations in feed(), in
+    * nextModel() or in both.
     */
   def feed(term: Term): Unit
 
   /**
     * Generate the next model if it exists.
+    *
+    * No guarantees are made on the runtime complexity of this function.
+    * Implementations are free to perform computations in feed(), in
+    * nextModel() or in both.
     *
     * @return A populated Option if a model exists and None otherwise.
     */

@@ -17,7 +17,7 @@ import scalax.collection.mutable.Graph
   * Supported rules are:
   * - (∨E): `(a ∨ b)^T`
   * - `(a ∨ b)^F`
-  * - `(a = b)^T` in conjunction with `ϕ = ψ`, of them containing `a` or `b`.
+  * - (=E): `(a = b)^T` in conjunction with `ϕ = ψ`, of them containing `a` or `b`.
   * - (RM: ∀): `(∀x.ϕ)^T`
   * - (RM: ∃): `(∀x. ϕ)^F`
   *
@@ -67,7 +67,20 @@ import scalax.collection.mutable.Graph
   * first saturate the current node before stepping down to one of its children. By this means,
   * we can make use of GraphTableauxMachine.isConsistent() which does not perform steps
   * anymore, but checks for consistency in a "naive" way. Cf. its documentation on formalization
-  * on "native".
+  * on "naive".
+  *
+  * <h3>Equalities</h3>
+  *
+  * (=E) was implemented in another way contrary to the other rules: when nextModel() checks
+  * for consistency using isConsistent(), the method will search for pairs (φ^s, ψ^t) with
+  * s != t and φ = ψ either syntactically or up to replacements of individual constants deemed
+  * equivalent. Hereby, we avoid having to actually apply any replacement rule in step(), which
+  * would require complicated tracking of which individual constants have been replaced in
+  * which terms yet on the very branch the machine is currently on.
+  *
+  * The equivalence sets (e.g. having (a = b)^T, (c = d)^T, (a = d)^T, (e = f)^T, one would get
+  * {a, b, c, d}, {e, f}) are computed in step() with equivalenceSetsClosure and used by
+  * isConsistent().
   */
 class GraphTableauxMachine extends ModelGenerator {
 
