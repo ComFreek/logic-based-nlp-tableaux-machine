@@ -20,6 +20,10 @@ Supported rules:
 2. If you are not using Windows: add the compiled GF `*.so` libraries in `lib/`.
 3. Install [SBT](https://www.scala-sbt.org/) if you do not have it already installed. (Check `sbt` on the command line.)
 
+## Documentation
+
+Extensive documentation with a high-level overview of the inner workings can be found in [`GraphTableauxMachine.scala`](https://gitlab.cs.fau.de/ze26zefo/TableauxMachine/blob/master/src/main/scala/de/fau/cs/gitlab/ze26zefo/TableauxMachine/GraphTableauxMachine.scala).
+
 ## Usage
 
 1. Run `sbt` in the root directory and then enter
