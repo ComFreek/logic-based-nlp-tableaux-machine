@@ -13,6 +13,8 @@ Supported rules:
 - `(a = b)^T` in conjunction with `ϕ = ψ`, of them containing `a` or `b`.
 - (RM: ∀): `(∀x.ϕ)^T`
 - (RM: ∃): `(∀x. ϕ)^F`
+- (RM: ∃⊥): If (RM: ∃) has been applied with a fresh individual constant and that branch closes
+  entirely, the column which branched because of (RM: ∃) is closed as well.
 
 ## Installation
 
@@ -32,7 +34,7 @@ created in the directory `test-models-output/latex`.
    You can use the LaTeX distribution of your choice, the generated code is supposed to
    be very portable. If you have `latexmk` at your fingertips, you can run `latexmk -pdf`
    in every suite subdirectory to automatically generate the PDFs.
-     
+
    Note that due to the use of the specific LaTeX package for the visualizations,
    nodes with one child do not display their branch visually, they are simply
    concatenated. This might happen in conjunction with (RM: ∃).
