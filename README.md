@@ -2,8 +2,8 @@
 
 Theorem prover and model generator for [first-order logic](https://en.wikipedia.org/wiki/First-order_logic).
 
-Implemented as an exercise for the course ["Logik-Basierte Sprachverarbeitung" (LBS)](https://kwarc.info/courses/lbs/)
-at the [Friedrich-Alexander University Erlangen-Nuremberg](https://www.fau.de/) in the winter
+Implemented as an exercise for the course ["Logik-Basierte Sprachverarbeitung" (LBS)](https://kwarc.info/courses/lbs/) by [Michael Kohlhase](https://kwarc.info/people/mkohlhase)
+at the [Friedrich-Alexander University Erlangen-Nuremberg](https://www.fau.eu/) in the winter
 term 2017/2018.
 
 Supported rules:
