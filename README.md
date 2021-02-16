@@ -1,6 +1,6 @@
 # TableauxMachine
 
-Theorem prover and model generator for [first-order logic](https://en.wikipedia.org/wiki/First-order_logic).
+**Interactive discourse-driven model generation for [first-order logic](https://en.wikipedia.org/wiki/First-order_logic).**
 
 Implemented as an exercise for the course ["Logik-Basierte Sprachverarbeitung" (LBS)](https://kwarc.info/courses/lbs/) by [Michael Kohlhase](https://kwarc.info/people/mkohlhase)
 at the [Friedrich-Alexander University Erlangen-Nuremberg](https://www.fau.eu/) in the winter
